@@ -17,8 +17,8 @@ def find_nth_occurence_in_string(haystack, needle, n):
 class Wappalyzer:
     def __init__(self, ip):
         self.ip = ip
-        self.https = True
-        self.http = True
+        self.urls = []
+        self.dict = []
     '''
     Определяет, есть ли http или https
     Возвращает две ссылки
@@ -30,86 +30,31 @@ class Wappalyzer:
             try:
                 r = requests.get(protocol + '://' + ip, verify=False)
                 if r.status_code == 200:
-                    list.append(r)
+                    self.urls.append(r.url)
             except requests.exceptions.ConnectionError:
-                list.append(None)
-                if protocol == 'http':
-                    self.http = False
-                if protocol == 'https':
-                    self.https = False
                 continue
-        http_url = list[0]
-        https_url = list[1]
-        return http_url, https_url.url
-
 
     '''
-    Получаем из сайта все пути к js файлам
+    Получаем из сайта все теги script
     '''
     def get_js_paths(self, response):
         paths = []
         text = response.text
-        indexs = []
-        n = 1
-        while True:
-            r = find_nth_occurence_in_string(text, 'script src=\"', n)
-            n += 1
-            if r != -1:
-                indexs.append(r)
-            else:
-                break
-        for index in indexs:
-            i = index
-            while text[i] != '\"':
-                i += 1
-            j = i + 1
-            while text[j] != '\"':
-                j += 1
-            paths.append(text[i:j].replace('\'', '').replace('\"', ''))
-        return paths
+        scripts = re.findall(r'(<script\s+src.*?>[\w\W]*?</script>)', text, re.MULTILINE)
+        return scripts
 
-
-    '''
-    построим пути к js фремворкам
-    '''
-    def build_url_to_get_js(self, list_of_paths):
-        list = []
-        if self.http:
-            for path in list_of_paths:
-                if 'https://' in path or 'http://' in path:
-                    list.append(path)
-                    continue
-                list.append('http://' + self.ip + '/' + path)
-
-        if self.https:
-            for path in list_of_paths:
-                if 'https://' in path or 'http://' in path:
-                    list.append(path)
-                    continue
-                list.append('https://' + self.ip + '/' + path)
-        return list
 
     '''
     сделать запрос и к js файлам
     '''
-    def get_js_versions(self, urls):
-        js = []
-        for url in urls:
-            res = requests.get(url, verify=False)
-            if not(self.ip in res.url):
-                result = self.analyze_js_file(res.url.split('/')[-1], res.text)
-                if result:
-                    js.append()
-                continue
-            framework = res.url.split(self.ip)[1]
-            if '/' in res.url:
-                result = self.analyze_js_file(framework.replace('js', '').replace('/', ''), res.text)
-            else:
-                result = self.analyze_js_file(framework, res.text)
-            if result:
-                js.append(result)
-        return
-
+    def get_js_versions(self, url, tags):
+        for tag in tags:
+            path = re.search(r'src\s*=\s*([^>]+)', tag)
+            print(path.groups())
+            built_url = self.build_url_to_get_js_file(url, path.groups()[0].replace('\"', '').replace('\'', ''))
+            version = self.analyze_js_file(built_url)
+            self.dict.append([path.groups()[0], version])
+        print(self.dict)
     '''
     Анализируем данный js файл на наличие версии(из названия файла и из содержимого файла)
     axios.mim.js
@@ -120,28 +65,30 @@ class Wappalyzer:
     signln.js?version=15
     fontawesome/all.js
     '''
-    def analyze_js_file(self, name, text):
-        version = re.search('[0-9].[0-9].[0-9]', name)
-        if version:
-            return {'name': name, 'version': version}
-        version = re.search('v[0-9].[0-9]', text)
-        if version:
-            return {'name': name, 'version': version}
-        version = re.search('v[0-9].[0-9].[0-9]', text)
-        if version:
-            return {'name': name, 'version': version}
+    def analyze_js_file(self, url):
+        try:
+            response_text = requests.get(url, verify=False).text
+            version = re.search(r'(v\d+.\d+.\d+)', response_text).groups()
+            print(version)
+        except AttributeError:
+            version = None
+        return  version
 
+    def build_url_to_get_js_file(self, url, path):
+        return (url + path)
 
     def make_request(self, url):
         r = requests.get(url, verify=False)# Ставим verify=False, чтобы не было проблем с HTTPS
         return r
 
     def wappalyzer(self):
-        http_url, https_url = self.get_protocols(self.ip)
-        for url in [http_url, https_url]:
+        self.get_protocols(self.ip)
+        for url in self.urls:
             if url is None:
                 continue
-            self.get_js_versions(self.build_url_to_get_js(self.get_js_paths(self.make_request(url))))
+            response = self.make_request(url)
+            tags = self.get_js_paths(response)
+            self.get_js_versions(url, tags)
         return
 
 
