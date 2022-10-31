@@ -21,6 +21,7 @@ class Wappalyzer:
         self.schemas = []
         self.server = None
         self.js_frameworks = []
+
     def make_request(self, schema):
         try:
             r = requests.get(schema + '://' + self.host, verify=False)
@@ -62,7 +63,7 @@ class Wappalyzer:
 
     def parse_framework(self, path):
         print(path) # DELETE LATER
-        if 'http' in path:
+        if 'http://' in path or 'https://' in path:
             try:
                 res = requests.get(path, verify=False)
                 self.get_js_version(res)
@@ -75,18 +76,20 @@ class Wappalyzer:
         self.js_frameworks.append({
             'path': path,
             'version': version,
-            'technologie':
+            'technologie': ''
             })
 
     def get_js_version(self, res):
         re_result = re.search(r'\d+?.\d+?.\d+?', res.request.url)
         if re_result is not None:
             return re_result.group()
-
-        re_result = re.search(r'v\d+?.\d+?.\d+?', res.request.text)
+        re_result = re.search(r'v\d+?.\d+?.\d+?', res.text)
         if re_result is not None:
             return re_result.group()
 
+    def get_js_technologie(self, res):
+        re_result = re.search(r'/[\w\W]+?.js', res.request.url)
+        print(re_result)
     '''
     '''
     def run(self):
