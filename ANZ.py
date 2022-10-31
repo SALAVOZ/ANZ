@@ -1,3 +1,5 @@
+import argparse
+
 import requests
 import re
 '''
@@ -13,16 +15,90 @@ def find_nth_occurence_in_string(haystack, needle, n):
     return start
 
 
+class Wappalyzer:
+    def __init__(self, host):
+        self.host = host
+        self.schemas = []
+        self.server = None
+        self.js_frameworks = []
+    def make_request(self, schema):
+        try:
+            r = requests.get(schema + '://' + self.host, verify=False)
+            self.parse_server(r)
+            self.parse_js_frameworks(r)
+            return r
+        except requests.exceptions.ConnectionError:
+            print('=' * 10)
+            print('Error to connect to ' + schema + '://' + self.host)
+            print('=' * 10)
+            return None
 
+    def get_schemas(self):
+        for schema in ['http', 'https']:
+            response = self.make_request(schema)
+            if response is not None:
+                self.schemas.append(schema)
+        print('Found schemas: ' + ', '.join(self.schemas))
+
+    def parse_server(self, response):
+        try:
+            self.server = response.headers['Server']
+            print('=' * 10)
+            print('Found Server header: ' + self.server)
+            print('=' * 10)
+        except KeyError:
+            print('=' * 10)
+            print('No Server header found')
+            print('=' * 10)
+
+    '''
+    Достаём js фреймворки
+    '''
+    def parse_js_frameworks(self, response):
+        script_tags = re.findall(r'(<script\s+src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?[^>]*?</script>)', response.text)
+        for script_tag in script_tags:
+            tag = script_tag[1][:-2]
+            self.parse_framework(tag)
+
+    def parse_framework(self, path):
+        print(path) # DELETE LATER
+        if 'http' in path:
+            try:
+                res = requests.get(path, verify=False)
+                self.get_js_version(res)
+                return
+            except requests.exceptions.ConnectionError:
+                print('=' * 10)
+                print('Error to connect to ' + path)
+                print('=' * 10)
+        version = self.get_js_version(path)
+        self.js_frameworks.append({
+            'path': path,
+            'version': version,
+            'technologie':
+            })
+
+    def get_js_version(self, res):
+        re_result = re.search(r'\d+?.\d+?.\d+?', res.request.url)
+        if re_result is not None:
+            return re_result.group()
+
+        re_result = re.search(r'v\d+?.\d+?.\d+?', res.request.text)
+        if re_result is not None:
+            return re_result.group()
+
+    '''
+    '''
+    def run(self):
+        self.get_schemas()
+
+
+'''
 class Wappalyzer:
     def __init__(self, ip):
         self.ip = ip
         self.https = True
         self.http = True
-    '''
-    Определяет, есть ли http или https
-    Возвращает две ссылки
-    '''
     def get_protocols(self, ip):
         protocols = ['http', 'https']
         list = []
@@ -43,9 +119,6 @@ class Wappalyzer:
         return http_url, https_url.url
 
 
-    '''
-    Получаем из сайта все пути к js файлам
-    '''
     def get_js_paths(self, response):
         paths = []
         text = response.text
@@ -69,9 +142,6 @@ class Wappalyzer:
         return paths
 
 
-    '''
-    построим пути к js фремворкам
-    '''
     def build_url_to_get_js(self, list_of_paths):
         list = []
         if self.http:
@@ -89,9 +159,6 @@ class Wappalyzer:
                 list.append('https://' + self.ip + '/' + path)
         return list
 
-    '''
-    сделать запрос и к js файлам
-    '''
     def get_js_versions(self, urls):
         js = []
         for url in urls:
@@ -108,9 +175,9 @@ class Wappalyzer:
                 result = self.analyze_js_file(framework, res.text)
             if result:
                 js.append(result)
-        return
+        return js
 
-    '''
+
     Анализируем данный js файл на наличие версии(из названия файла и из содержимого файла)
     axios.mim.js
     vue.js
@@ -119,7 +186,7 @@ class Wappalyzer:
     bootstrap/jquery.min.js
     signln.js?version=15
     fontawesome/all.js
-    '''
+
     def analyze_js_file(self, name, text):
         version = re.search('[0-9].[0-9].[0-9]', name)
         if version:
@@ -144,8 +211,11 @@ class Wappalyzer:
             self.get_js_versions(self.build_url_to_get_js(self.get_js_paths(self.make_request(url))))
         return
 
-
+'''
 
 
 if __name__ == '__main__':
-    Wappalyzer('rq.tatneft.ru').wappalyzer()
+    parser = argparse.ArgumentParser(description='Write args: ')
+    parser.add_argument('-H', '--host', type=str, required=True, help='Write host')
+    args = parser.parse_args()
+    Wappalyzer(args.host).run()
