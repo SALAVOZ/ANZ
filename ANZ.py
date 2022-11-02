@@ -2,18 +2,6 @@ import argparse
 
 import requests
 import re
-'''
-Найти n-ое вхождение подстроки в строке
-'''
-
-
-def find_nth_occurence_in_string(haystack, needle, n):
-    start = haystack.find(needle)
-    while start >= 0 and n > 1:
-        start = haystack.find(needle, start + len(needle))
-        n -= 1
-    return start
-
 
 class Wappalyzer:
     def __init__(self, host):
@@ -21,12 +9,9 @@ class Wappalyzer:
         self.schemas = []
         self.server = None
         self.js_frameworks = []
-
     def make_request(self, schema):
         try:
             r = requests.get(schema + '://' + self.host, verify=False)
-            self.parse_server(r)
-            self.parse_js_frameworks(r)
             return r
         except requests.exceptions.ConnectionError:
             print('=' * 10)
@@ -39,6 +24,8 @@ class Wappalyzer:
             response = self.make_request(schema)
             if response is not None:
                 self.schemas.append(schema)
+                self.parse_server(response)
+                self.parse_js_frameworks(response, schema)
         print('Found schemas: ' + ', '.join(self.schemas))
 
     def parse_server(self, response):
@@ -55,46 +42,73 @@ class Wappalyzer:
     '''
     Достаём js фреймворки
     '''
-    def parse_js_frameworks(self, response):
+    def parse_js_frameworks(self, response, schema):
         script_tags = re.findall(r'(<script\s+src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?[^>]*?</script>)', response.text)
         for script_tag in script_tags:
             tag = script_tag[1][:-2]
-            self.parse_framework(tag)
+            self.parse_framework(tag, schema)
 
-    def parse_framework(self, path):
-        print(path) # DELETE LATER
+    def parse_framework(self, path, schema):
         if 'http://' in path or 'https://' in path:
             try:
-                res = requests.get(path, verify=False)
-                self.get_js_version(res)
-                return
+                version = self.get_js_through_url(path)
             except requests.exceptions.ConnectionError:
                 print('=' * 10)
                 print('Error to connect to ' + path)
                 print('=' * 10)
-        version = self.get_js_version(path)
+        else:
+            version = self.get_js_through_path(path, schema)# ДОРАБОТАТЬ ФУНКЦИЮ
         self.js_frameworks.append({
             'path': path,
             'version': version,
             'technologie': ''
             })
 
-    def get_js_version(self, res):
-        re_result = re.search(r'\d+?.\d+?.\d+?', res.request.url)
-        if re_result is not None:
-            return re_result.group()
-        re_result = re.search(r'v\d+?.\d+?.\d+?', res.text)
-        if re_result is not None:
-            return re_result.group()
+    def get_js_through_url(self, url):
+        try:
+            res = requests.get(url, verify=False)
+            re_result = re.search(r'\d+?.\d+?.\d+?', res.request.url)
+            if re_result is not None:
+                return re_result.group()
+            re_result = re.search(r'v\d+?.\d+?.\d+?', res.text)
+            if re_result is not None:
+                return re_result.group()
+        except requests.exceptions.ConnectionError:
+            print('=' * 10)
+            print('No Server header found')
+            print('=' * 10)
+
+    def get_js_through_path(self, path, schema):
+        try:
+            res = requests.get(schema + '://' + self.host + '/' + path, verify=False)
+            if res.status_code == 200:
+                re_result = re.search(r'\d+?.\d+?.\d+?', res.request.url)
+                if re_result is not None:
+                    return re_result.group()
+                re_result = re.search(r'v\d+?.\d+?.\d+?', res.text)
+                if re_result is not None:
+                    return re_result.group()
+        except requests.exceptions.ConnectionError:
+            print('=' * 10)
+            print('Connection error: ' + schema + '://' + self.host + path)
+            print('=' * 10)
+
 
     def get_js_technologie(self, res):
         re_result = re.search(r'/[\w\W]+?.js', res.request.url)
         print(re_result)
+
+
+    '''
+    Накидываем CVE
+    '''
+    def parse_snyk(self):
+        pass
     '''
     '''
     def run(self):
         self.get_schemas()
-
+        print(self.js_frameworks)
 
 '''
 class Wappalyzer:
