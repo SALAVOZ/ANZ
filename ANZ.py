@@ -26,6 +26,7 @@ class Wappalyzer:
                 self.schemas.append(schema)
                 self.parse_server(response)
                 self.parse_js_frameworks(response, schema)
+                self.parse_snyk()
         print('Found schemas: ' + ', '.join(self.schemas))
 
     def parse_server(self, response):
@@ -58,10 +59,11 @@ class Wappalyzer:
                 print('=' * 10)
         else:
             version = self.get_js_through_path(path, schema)# ДОРАБОТАТЬ ФУНКЦИЮ
+        technologie = self.get_js_technologie(path)
         self.js_frameworks.append({
             'path': path,
             'version': version,
-            'technologie': ''
+            'technologie': technologie
             })
 
     def get_js_through_url(self, url):
@@ -93,17 +95,28 @@ class Wappalyzer:
             print('Connection error: ' + schema + '://' + self.host + path)
             print('=' * 10)
 
-
-    def get_js_technologie(self, res):
-        re_result = re.search(r'/[\w\W]+?.js', res.request.url)
-        print(re_result)
-
+    def get_js_technologie(self, path):
+        try:
+            re_result = re.search(r'[/]?([a-zA-Z]+?).[-bundle.min@0-9]*?.js', path)
+            return re_result.group()
+        except AttributeError:
+            print('Error in get_js_technologie')
 
     '''
     Накидываем CVE
     '''
     def parse_snyk(self):
+        for fram in self.js_frameworks:
+            pass
+
+    def parse_nginx_site(self):
         pass
+
+    def parse_apache_site(self):
+        pass
+
+
+
     '''
     '''
     def run(self):
