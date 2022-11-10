@@ -23,7 +23,7 @@ class Wappalyzer:
             return None
 
     def get_schemas(self):
-        for schema in ['https']: # ПОТОМ СДЕЛАТЬ for schema in ['http', 'https']:
+        for schema in ['http','https']: # ПОТОМ СДЕЛАТЬ for schema in ['http', 'https']:
             response = self.make_request(schema)
             if response is not None:
                 self.schemas.append(schema)
@@ -35,6 +35,8 @@ class Wappalyzer:
     def parse_server(self, response):
         try:
             self.server = response.headers['Server']
+            if 'nginx'.upper() in self.server.upper():
+                self.parse_nginx_site()
             print('=' * 10)
             print('Found Server header: ' + self.server)
             print('=' * 10)
@@ -197,18 +199,56 @@ class Wappalyzer:
         return result_all_spans
 
     def parse_nginx_site(self):
-        pass
+        version = re.search(r'\d+?.\d+?.\d+?', self.server).group(0)
+        url = 'http://nginx.org/en/security_advisories.html'
+        res = requests.get(url, verify=False)
+        soup = BeautifulSoup(res.text, 'lxml')
+        div = soup.find('div', {'id': 'content'})
+        all_li = div.find_all('li')
+        for li in all_li:
+            text = li.find(text=re.compile(r'Vulnerable:[\w\W]+'))
+            conditions = re.findall(r'\d+.\d+.\d+\s*-\s*\d+.\d+.\d+', text)
+            for condition in conditions:
+                conds = condition.replace(' ', '').split('-')
+                if not(self.comparing_version(conds[0], version)) and self.comparing_version(conds[1], version):
+                    try:
+                        cve = li.find('a', text=re.compile(r'CVE-\d+-\d+')).text
+                        self.vulnerable.append({
+                            'Server': self.server,
+                            'vuln': cve
+                        })
+                    except Exception:
+                        print('Vuln at parsing nginx site')
 
-    def parse_apache_site(self):
-        pass
 
-
+    '''
+    Вернёт True, если version > comparing
+    Иначе False
+    '''
+    @staticmethod
+    def comparing_version(version, comparing):
+        version_splited = version.split('.')
+        comparing_splited = comparing.split('.')
+        if len(version_splited) == len(comparing_splited):
+            for i in range(len(version_splited)):
+                try:
+                    if int(version_splited[i]) > int(comparing_splited[i]):
+                        return True
+                    if int(version_splited[i]) == int(comparing_splited[i]):
+                        continue
+                    if int(version_splited[i]) < int(comparing_splited[i]):
+                        return False
+                except Exception:
+                    print('Error in comparing version')
+        print('Error in comparing. Not equal length of args')
+        return False
 
     '''
     '''
     def run(self):
         self.get_schemas()
         print(self.vulnerable)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Write args: ')
