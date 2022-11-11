@@ -9,6 +9,7 @@ class Wappalyzer:
         self.host = host
         self.schemas = []
         self.server = None
+        self.via = None
         self.js_frameworks = []
         self.vulnerable = []
 
@@ -34,9 +35,8 @@ class Wappalyzer:
 
     def parse_server(self, response):
         try:
-            self.server = response.headers['Server']
-            if 'nginx'.upper() in self.server.upper():
-                self.parse_nginx_site()
+            if self.server is None:
+                self.server = response.headers['Server']
             print('=' * 10)
             print('Found Server header: ' + self.server)
             print('=' * 10)
@@ -44,6 +44,17 @@ class Wappalyzer:
             print('=' * 10)
             print('No Server header found')
             print('=' * 10)
+        try:
+            self.via = response.headers['Via']
+        except KeyError:
+            print('=' * 10)
+            print('Found Via header: ' + self.server)
+            print('=' * 10)
+        if 'nginx'.upper() in self.server.upper():
+            self.parse_nginx_site()
+        if 'apache'.upper() in self.server.upper():
+            self.parse_apache_site()
+
 
     '''
     Достаём js фреймворки
@@ -64,8 +75,8 @@ class Wappalyzer:
                 print('Error to connect to ' + path)
                 print('=' * 10)
         else:
-            version = self.get_js_through_path(path, schema)# ДОРАБОТАТЬ ФУНКЦИЮ
-        technologie = self.get_js_technologie(path)
+            technologie = self.get_js_technologie(path)
+            version = self.get_js_through_path(path, schema, technologie)# ДОРАБОТАТЬ ФУНКЦИЮ
         self.js_frameworks.append({
             'path': path,
             'version': version,
@@ -87,16 +98,32 @@ class Wappalyzer:
             print('No Server header found')
             print('=' * 10)
 
-    def get_js_through_path(self, path, schema):
+    def get_js_through_path(self, path, schema, technologie):
         try:
-            res = requests.get(schema + '://' + self.host + '/' + path, verify=False)
+            url = schema + '://' + self.host + '/' + path
+            res = requests.get(url, verify=False)
+            if res.request.url != url:
+                return None
             if res.status_code == 200:
-                re_result = re.search(r'\d+?.\d+?.\d+?', res.request.url)
+                re_result = re.search(r'\d+\.\d\.\d+', res.request.url)
+
                 if re_result is not None:
                     return re_result.group()
-                re_result = re.search(r'v\d+?.\d+?.\d+?', res.text)
+
+                re_result = re.search(r'v(\d+\.\d\.\d+)', res.text)
                 if re_result is not None:
-                    return re_result.group()
+                    return re_result.group(1)
+
+                re_result = re.search(r'VERSION\s*=\s*[\"\']?(\d+\.\d\.\d+)[\"\']?', res.text, re.IGNORECASE)
+                if re_result is not None:
+                    return re_result.group(1)
+
+                re_result = re.search(fr'{technologie}\s*[=:]\s*[\"\']?(\d+\.\d\.\d+)[\"\']?', res.text, re.IGNORECASE)
+                if re_result is not None:
+                    return re_result.group(1)
+
+                return None
+
         except requests.exceptions.ConnectionError:
             print('=' * 10)
             print('Connection error: ' + schema + '://' + self.host + path)
@@ -109,7 +136,9 @@ class Wappalyzer:
                 return None
             else:
                 re_result = re.search(r'([a-zA-Z0-9]+)[-.@]+', path)
-                return re_result.group(1) # под индеком ноль почему-то re возвращает весь найденный
+                if re_result is None:
+                    re_result = re.search(r'/([a-z-A-Z]+)\?', path)
+                return re_result.group().replace('/', '').replace('?', '') # под индеком ноль почему-то re возвращает весь найденный
         except AttributeError:
             print('Error in get_js_technologie')
 
@@ -220,6 +249,56 @@ class Wappalyzer:
                     except Exception:
                         print('Vuln at parsing nginx site')
 
+    def parse_apache_site(self):
+        try:
+            version = re.search(r'\d+.\d+.\d+', self.server).group()
+        except Exception:
+            print('No version on header \'Server\'')
+            if self.via is None:
+                return
+            else:
+                try:
+                    version = re.search(r'\d+.\d+.\d+', self.via).group()
+                except Exception:
+                    return
+        for i in range(11, 25, 1):
+            url = f'https://httpd.apache.org/security/vulnerabilities_{i}.html'
+            res = requests.get(url, verify=False)
+            if res.status_code != 404:
+                soup = BeautifulSoup(res.text, 'lxml')
+                dls = soup.findAll('dl')
+                for dl in dls:
+                    dt = dl.findNext('dt')
+                    dd = dl.findNext('dd')
+                    cve = dt.find(text=re.compile(r'CVE-\d+-\d+'))
+                    table = dd.find('table')
+                    last_row = table('tr')[-1]
+                    conditions = re.findall(r'\d+.\d+.\d+', last_row('td')[-1].text)
+                    for condition in conditions:
+                        if '>' in condition:
+                            if '=' in condition and version == condition:
+                                self.vulnerable.append({
+                                    'Server': self.server,
+                                    'vuln': cve})
+                            if self.comparing_version(version, condition):
+                                self.vulnerable.append({
+                                    'Server': self.server,
+                                    'vuln': cve})
+                            continue
+                        if '<' in condition:
+                            if '=' in condition and version == condition:
+                                self.vulnerable.append({
+                                    'Server': self.server,
+                                    'vuln': cve})
+                            if not(self.comparing_version(version, condition)):
+                                self.vulnerable.append({
+                                    'Server': self.server,
+                                    'vuln': cve})
+                            continue
+                        if version == condition:
+                            self.vulnerable.append({
+                                'Server': self.server,
+                            'vuln': cve})
 
     '''
     Вернёт True, если version > comparing
