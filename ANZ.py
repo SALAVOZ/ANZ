@@ -69,7 +69,7 @@ class Wappalyzer:
     '''
     def parse_js_frameworks(self, response, schema):
         #script_tags = re.findall(r'(<script[\w\W]+?src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?[^>]*?</script>)', response.text)
-        script_tags = re.findall(r'<script[\w\W]+?src=[\'\"]([\w\W]+?)[\'\"][\w\W]+?></script>', response.text)
+        script_tags = re.findall(r'src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?>', response.text)
         for script_tag in script_tags:
             self.parse_framework(script_tag, schema)
 
