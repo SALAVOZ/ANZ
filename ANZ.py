@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+
 class Wappalyzer:
     def __init__(self, host):
         self.host = host
@@ -16,7 +17,13 @@ class Wappalyzer:
 
     def make_request(self, schema):
         try:
-            r = requests.get(schema + '://' + self.host, verify=False)
+            r = requests.get(schema + '://' + self.host, verify=False, allow_redirects=True)
+            try:
+                if 'window.location.href' in r.text:
+                    href = re.search(r'[\'\"]([\w\W]+)[\'\"]', r.text).group(1)
+                    r = requests.get(schema + '://' + self.host + href, verify=False, allow_redirects=True)
+            except Exception:
+                pass
             return r
         except requests.exceptions.ConnectionError:
             print('=' * 10)
@@ -61,13 +68,14 @@ class Wappalyzer:
     Достаём js фреймворки
     '''
     def parse_js_frameworks(self, response, schema):
-        script_tags = re.findall(r'(<script[\w\W]+?src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?[^>]*?</script>)', response.text)
+        #script_tags = re.findall(r'(<script[\w\W]+?src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?[^>]*?</script>)', response.text)
+        script_tags = re.findall(r'<script[\w\W]+?src=[\'\"]([\w\W]+?)[\'\"][\w\W]+?></script>', response.text)
         for script_tag in script_tags:
-            tag = script_tag[1][:-2]
-            self.parse_framework(tag, schema)
+            self.parse_framework(script_tag, schema)
 
     def parse_framework(self, path, schema):
         version = None
+        technologie = None
         if 'http://' in path or 'https://' in path:
             try:
                 version = self.get_js_through_url(path)
@@ -101,7 +109,7 @@ class Wappalyzer:
 
     def get_js_through_path(self, path, schema, technologie):
         try:
-            url = schema + '://' + self.host + '/' + path
+            url = schema + '://' + self.host + path
             res = requests.get(url, verify=False)
             if res.request.url != url:
                 return None
@@ -162,8 +170,12 @@ class Wappalyzer:
                     spans = tr.find_all('span', class_='vue--chip__value')
                     result = self.snyk_condition(fram['version'].replace('v', ''), spans)
                     if result:
-                        vuln_obj = fram
-                        vuln_obj['vuln'] = []
+                        vuln_obj = {
+                            'path': fram['path'],
+                            'version': fram['version'],
+                            'technologie': fram['technologie'],
+                            'vuln': []
+                        }
                         a = tr.find('a')['href']
                         res = requests.get(f'https://security.snyk.io/{a}')
                         soup = BeautifulSoup(res.text, 'lxml')
@@ -180,8 +192,7 @@ class Wappalyzer:
     '''
     Уязвимо или нет
     '''
-    @staticmethod
-    def snyk_condition(framework_version, spans):
+    def snyk_condition(self, framework_version, spans):
         result_all_spans = False
         if framework_version is None:
             return None
@@ -191,40 +202,19 @@ class Wappalyzer:
             condition = re.findall(r'[<>=]{1,2}\d+.\d+.\d+', version)
             for condition in condition:
                 if '>=' in condition:
-                    if framework_version >= condition.replace('=', '').replace('>', '').replace('<', ''):
-                        result_one_span = result_one_span and True
-                        continue
-                    else:
-                        result_one_span = result_one_span and False
-                        continue
+                    result_one_span = result_one_span and (self.comparing_version(framework_version, condition.replace('>=', '')) or framework_version == condition.replace('>=', ''))
+                    continue
                 if '>' in condition:
-                    if framework_version > condition.replace('=', '').replace('>', '').replace('<', ''):
-                        result_one_span = result_one_span and True
-                        continue
-                    else:
-                        result_one_span = result_one_span and False
-                        continue
+                    result_one_span = result_one_span and self.comparing_version(framework_version, condition.replace('>', ''))
+                    continue
                 if '<=' in condition:
-                    if framework_version <= condition.replace('=', '').replace('>', '').replace('<', ''):
-                        result_one_span = result_one_span and True
-                        continue
-                    else:
-                        result_one_span = result_one_span and False
-                        continue
+                    result_one_span = result_one_span and (not self.comparing_version(framework_version, condition.replace('<=','')) or framework_version == condition.replace('>=', ''))
+                    continue
                 if '<' in condition:
-                    if framework_version < condition.replace('=', '').replace('>', '').replace('<', ''):
-                        result_one_span = result_one_span and True
-                        continue
-                    else:
-                        result_one_span = result_one_span and False
-                        continue
+                    result_one_span = result_one_span and not self.comparing_version(framework_version, condition.replace('<',''))
+                    continue
                 if '=' in condition:
-                    if framework_version == condition.replace('=', '').replace('>', '').replace('<', ''):
-                        result_one_span = result_one_span and True
-                        continue
-                    else:
-                        result_one_span = result_one_span and False
-                        continue
+                    result_one_span = result_one_span and framework_version == condition.replace('=', '')
             result_all_spans = result_all_spans or result_one_span
         return result_all_spans
 
