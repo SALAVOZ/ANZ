@@ -2,7 +2,8 @@ import argparse
 import requests
 import re
 from bs4 import BeautifulSoup
-
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class Wappalyzer:
     def __init__(self, host):
@@ -60,7 +61,7 @@ class Wappalyzer:
     Достаём js фреймворки
     '''
     def parse_js_frameworks(self, response, schema):
-        script_tags = re.findall(r'(<script\s+src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?[^>]*?</script>)', response.text)
+        script_tags = re.findall(r'(<script[\w\W]+?src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?[^>]*?</script>)', response.text)
         for script_tag in script_tags:
             tag = script_tag[1][:-2]
             self.parse_framework(tag, schema)
@@ -105,14 +106,14 @@ class Wappalyzer:
             if res.request.url != url:
                 return None
             if res.status_code == 200:
-                re_result = re.search(r'\d+\.\d\.\d+', res.request.url)
+                re_result = re.search(r'v(\d+\.\d+\.\d+)', res.request.url, re.IGNORECASE)
 
-                if re_result is not None:
-                    return re_result.group()
-
-                re_result = re.search(r'v(\d+\.\d\.\d+)', res.text)
                 if re_result is not None:
                     return re_result.group(1)
+
+                re_result = re.search(r'\d+\.\d+\.\d+', res.text)
+                if re_result is not None:
+                    return re_result.group(0)
 
                 re_result = re.search(r'VERSION\s*=\s*[\"\']?(\d+\.\d\.\d+)[\"\']?', res.text, re.IGNORECASE)
                 if re_result is not None:
@@ -135,10 +136,10 @@ class Wappalyzer:
             if 'http://' in path or 'https://' in path:
                 return None
             else:
-                re_result = re.search(r'([a-zA-Z0-9]+)[-.@]+', path)
+                re_result = re.search(r'([-a-zA-Z0-9]+)[-.@]+', path)
                 if re_result is None:
                     re_result = re.search(r'/([a-z-A-Z]+)\?', path)
-                return re_result.group().replace('/', '').replace('?', '') # под индеком ноль почему-то re возвращает весь найденный
+                return re_result.group().replace('/', '').replace('?', '').replace('.', '')
         except AttributeError:
             print('Error in get_js_technologie')
 
@@ -228,7 +229,10 @@ class Wappalyzer:
         return result_all_spans
 
     def parse_nginx_site(self):
-        version = re.search(r'\d+?.\d+?.\d+?', self.server).group(0)
+        try:
+            version = re.search(r'\d+?.\d+?.\d+?', self.server).group(0)
+        except Exception:
+            return None
         url = 'http://nginx.org/en/security_advisories.html'
         res = requests.get(url, verify=False)
         soup = BeautifulSoup(res.text, 'lxml')
@@ -322,12 +326,22 @@ class Wappalyzer:
         print('Error in comparing. Not equal length of args')
         return False
 
+    def printing(self):
+        without_dubls = []
+        for vuln in self.vulnerable:
+            if vuln not in without_dubls:
+                without_dubls.append(vuln)
+        for vuln in without_dubls:
+            if 'Server' in vuln:
+                print(vuln['Server'] + ': ' + vuln['vuln'])
+            if 'path' in vuln:
+                print(vuln['path'] + ' to ' + vuln['technologie'] + ' with version ' + vuln['version'] + ':' + ', '.join(vuln['vuln']))
+
     '''
     '''
     def run(self):
         self.get_schemas()
-        print(self.vulnerable)
-
+        self.printing()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Write args: ')
