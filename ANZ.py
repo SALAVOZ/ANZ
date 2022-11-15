@@ -7,21 +7,24 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Wappalyzer:
-    def __init__(self, host):
+    def __init__(self, host, dir=None):
         self.host = host
         self.schemas = []
         self.server = None
         self.via = None
         self.js_frameworks = []
         self.vulnerable = []
-
+        self.dir = dir
     def make_request(self, schema):
         try:
-            r = requests.get(schema + '://' + self.host, verify=False, allow_redirects=True)
+            if dir is not None:
+                url = f'{self.host}/{self.dir}'.replace('//', '/')
+                r = requests.get(schema + '://' + url, verify=False, allow_redirects=True)
             try:
                 if 'window.location.href' in r.text:
                     href = re.search(r'[\'\"]([\w\W]+)[\'\"]', r.text).group(1)
-                    r = requests.get(schema + '://' + self.host + href, verify=False, allow_redirects=True)
+                    url = f'{self.host}/{href}'.replace('//', '/')
+                    r = requests.get(schema + '://' + url, verify=False, allow_redirects=True)
             except Exception:
                 pass
             return r
@@ -33,43 +36,55 @@ class Wappalyzer:
 
     def get_schemas(self):
         for schema in ['http','https']: # ПОТОМ СДЕЛАТЬ for schema in ['http', 'https']:
+            print(f'Checking schema {schema}...')
             response = self.make_request(schema)
             if response is not None:
+                print('')
                 self.schemas.append(schema)
                 self.parse_server(response)
                 self.parse_js_frameworks(response, schema)
                 self.parse_snyk()
+            else:
+                print(f'{schema} doesn\'t exist at host')
         print('Found schemas: ' + ', '.join(self.schemas))
 
     def parse_server(self, response):
         try:
             if self.server is None:
                 self.server = response.headers['Server']
-            print('=' * 10)
+            print('=' * 50)
             print('Found Server header: ' + self.server)
-            print('=' * 10)
-        except KeyError:
-            print('=' * 10)
+            print('=' * 50)
+        except Exception:
+            print('=' * 50)
             print('No Server header found')
-            print('=' * 10)
+            print('=' * 50)
         try:
             self.via = response.headers['Via']
+            print('=' * 50)
+            print('Found Via header: ' + self.via)
+            print('=' * 50)
         except KeyError:
-            print('=' * 10)
-            print('Found Via header: ' + self.server)
-            print('=' * 10)
-        if 'nginx'.upper() in self.server.upper():
-            self.parse_nginx_site()
-        if 'apache'.upper() in self.server.upper():
-            self.parse_apache_site()
-
+            print('=' * 50)
+            print('No Via header found')
+            print('=' * 50)
+        version = None
+        if self.server is not None:
+            version = self.server
+        elif self.via is not None:
+            version = self.via
+        if version is not None:
+            if 'nginx'.upper() in self.server.upper():
+                self.parse_nginx_site(version)
+            if 'apache'.upper() in self.server.upper():
+                self.parse_apache_site(version)
 
     '''
     Достаём js фреймворки
     '''
     def parse_js_frameworks(self, response, schema):
         #script_tags = re.findall(r'(<script[\w\W]+?src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?[^>]*?</script>)', response.text)
-        script_tags = re.findall(r'src\s*=\s*[\'\"]?([\w\W]+?)[\'\"]?>', response.text)
+        script_tags = re.findall(r'src\s*=\s*[\'\"]([\w\W]+?)[\'\"]', response.text)
         for script_tag in script_tags:
             self.parse_framework(script_tag, schema)
 
@@ -109,8 +124,13 @@ class Wappalyzer:
 
     def get_js_through_path(self, path, schema, technologie):
         try:
-            url = schema + '://' + self.host + path
+            url = f'{self.host}/{path}'.replace('//', '/')
+            url = schema + '://' + url
             res = requests.get(url, verify=False)
+            if res.status_code == 404 and self.dir is not None:
+                url = f'{self.host}/{self.dir}/{path}'.replace('//', '/')
+                url = schema + '://' + url
+                res = requests.get(url, verify=False)
             if res.request.url != url:
                 return None
             if res.status_code == 200:
@@ -218,9 +238,9 @@ class Wappalyzer:
             result_all_spans = result_all_spans or result_one_span
         return result_all_spans
 
-    def parse_nginx_site(self):
+    def parse_nginx_site(self, version_from_response):
         try:
-            version = re.search(r'\d+?.\d+?.\d+?', self.server).group(0)
+            version = re.search(r'\d+?.\d+?.\d+?', version_from_response).group(0)
         except Exception:
             return None
         url = 'http://nginx.org/en/security_advisories.html'
@@ -336,5 +356,6 @@ class Wappalyzer:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Write args: ')
     parser.add_argument('-H', '--host', type=str, required=True, help='Write host')
+    parser.add_argument('-d', '--dir', type=str, required=False, help='Write dir/file')
     args = parser.parse_args()
-    Wappalyzer(args.host).run()
+    Wappalyzer(host=args.host, dir=args.dir).run()
